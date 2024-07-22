@@ -9,8 +9,11 @@ class Lobby:
         self.message = message
         self.channel_id = channel_id
         self.reactors = []
+        self.pinged = False
         self.id = Lobby.id 
         Lobby.id += 1 
+        
+        self.last_voice_activity = start_time  # initialize with the start time
 
     async def update_message(self, bot):
         channel = bot.get_channel(self.channel_id)
