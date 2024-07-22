@@ -41,6 +41,7 @@ Or equally randomizes games using the input <game> <game> ...
 """
 @bot.command(name = "pickgame")
 async def pick_game(ctx, *args):
+    # input check
     if not args:
         await ctx.send("Please provide at least one game name, or pairs of game names and their probabilities.")
         return
@@ -48,12 +49,14 @@ async def pick_game(ctx, *args):
     games = []
     probabilities = []
     
-    # Check if input is game-probability pairs
+    # check if input is game-probability pairs to use normalized weighted probabilities
     if len(args) % 2 == 0 and all(is_float(args[i + 1]) for i in range(0, len(args), 2)):
+        # create game probability array pairs
         for i in range(0, len(args), 2):
             game = args[i]
             probability = float(args[i + 1])
             
+            # probability check
             if probability <= 0:
                 await ctx.send("Probability values must be greater than zero.")
                 return
@@ -61,31 +64,30 @@ async def pick_game(ctx, *args):
             games.append(game)
             probabilities.append(probability)
         
-        # Choose the game using weights
+        # choose the game using weighted probabilities
         chosen_game = random.choices(games, weights=probabilities, k=1)[0]
     
+    # else use equal probabilities
     else:
         games = list(args)
         
-        if not games:
-            await ctx.send("Please provide at least one game name.")
-            return
-        
+        # choose the game using equal probabilities        
         chosen_game = random.choice(games)
 
     # sending initial message
     message = await ctx.send("The selected game is: ")
     
-    # simulate roulette effect
+    # simulate roulette effect through editing a message
     last_game = None
-    for _ in range(5):  # how many rolls
+    for _ in range(5): # how many rolls
         while True:
             current_game = random.choice(games)
             if current_game != last_game:
                 break
         current_game = random.choice(games)
+        # edit message
         await message.edit(content=f"The selected game is: {current_game}")
-        await asyncio.sleep(0.3)  # Roll speed
+        await asyncio.sleep(0.3)  # roll speed
     
     # final result
     await message.edit(content=f":sparkles: The selected game is: {chosen_game} :sparkles:")
@@ -97,7 +99,7 @@ Players are pinged when it is time for the lobby to start through an alert messa
 """
 @bot.command(name = "startlobby")
 async def start_lobby(ctx, *args):    
-    # ensure correct input length
+    # input check
     if len(args) != 2:
         await ctx.send("Invalid input. Use the format: `$startlobby <game> <time>`")
         return
@@ -118,6 +120,7 @@ async def start_lobby(ctx, *args):
             minutes = int(match.group(2))
             period = match.group(3).upper()
 
+            # adjust for 24 hour time system
             if period == 'PM' and hours != 12:
                 hours += 12
             if period == 'AM' and hours == 12:
@@ -149,7 +152,7 @@ async def start_lobby(ctx, *args):
     random_emote = random.choice(EMOTES)
     await lobby_message.add_reaction(random_emote)
 
-    # edit the lobby message to include additional information if needed
+    # lobby function to add names of players
     await lobby.update_message(bot)
     
 
@@ -159,6 +162,7 @@ Displays message if removal was successful
 """
 @bot.command(name = "stoplobby")
 async def stop_lobby(ctx, *args):
+    # input check
     if len(args) != 1:
         await ctx.send("Invalid input. Use the format: `$stoplobby <ID>`")
         return
@@ -169,15 +173,17 @@ async def stop_lobby(ctx, *args):
         await ctx.send("Invalid ID format. ID should be an integer.")
         return
 
-    id = int(id)  # integer for comparison
+    # integer for comparison
+    id = int(id) 
     
+    # check all lobbies for matching id (O(n))
     for lobby in active_lobbies:
         if lobby.id == id:
             active_lobbies.remove(lobby)
             await ctx.send(f"Lobby {id} removed.")
             return
 
-    # If no lobby is found
+    # if no lobby is found
     await ctx.send(f"Lobby {id} does not exist.")
     
 
@@ -187,11 +193,15 @@ Includes info about game, start time, and players
 """
 @bot.command(name = "listlobbies")
 async def list_lobbies(ctx):
+    # no active lobbies
     if not active_lobbies:
         await ctx.send("There are no active lobbies.")
         return
     
-    embed = discord.Embed(title="Active Lobbies", color=discord.Color.blue())
+    # active lobbies displayed using embed
+    embed = discord.Embed(title="Active Lobbies", color = discord.Color.blue())
+    
+    # for each lobby add the relevant embed info
     for lobby in active_lobbies:
         start_time_str = lobby.start_time.strftime("%Y-%m-%d %I:%M %p")
         reactor_names = ', '.join([member.display_name for member in lobby.reactors])
@@ -208,7 +218,7 @@ Moves all players in a lobby to an empty voice channel if one is available
 """
 @bot.command(name="clearcomms")
 async def clear_comms(ctx, *args):
-    
+    # input check
     if (len(args) != 1):
         await ctx.send("Invalid input. Use the format: `$clearcomms <ID>`")
         
@@ -248,11 +258,13 @@ async def on_voice_state_update(member, before, after):
             if before.channel is None and after.channel is not None:
                 # member joined a voice channel
                 lobby.last_voice_activity = datetime.now()
+                
             elif before.channel is not None and after.channel is None:
                 # member left a voice channel
                 all_members_left = all(not m.voice or not m.voice.channel for m in lobby.reactors)
                 if all_members_left:
                     lobby.last_voice_activity = datetime.now()
+                    
             break
     
 """
@@ -261,6 +273,8 @@ Background task to check lobbies and ping players once at the start time
 @tasks.loop(seconds=60)  # check every minute
 async def lobby_checker():
     now = datetime.now()
+    
+    # ping players belonging to starting lobbies
     for lobby in active_lobbies:
         if now >= lobby.start_time and lobby.pinged == False:
             lobby.pinged = True
@@ -273,6 +287,8 @@ Wait time: 5 mins
 @tasks.loop(seconds=60)  # check every minute
 async def inactivity_checker():
     now = datetime.now()
+    
+    # close lobbies that have been idle for 5 mins
     for lobby in active_lobbies:
         all_members_inactive = all(not m.voice or not m.voice.channel for m in lobby.reactors)
         if all_members_inactive and (now - lobby.last_voice_activity).total_seconds() > 300:
@@ -284,12 +300,18 @@ Updates lobby message on reaction add
 """
 @bot.event
 async def on_raw_reaction_add(payload):
+    # ignore reactions from bot (self)
     if payload.user_id == bot.user.id:
-        return  # ignore reactions from the bot itself
+        return
+    
+    # for any reaction belonging to a lobby message (message_id)
     for lobby in active_lobbies:
         if payload.message_id == lobby.message_id and payload.channel_id == lobby.channel_id:
+            # get the user
             guild = bot.get_guild(payload.guild_id)
             member = guild.get_member(payload.user_id)
+            
+            # if user is not stored as a reactor, add them
             if member and member not in lobby.reactors:
                 lobby.reactors.append(member)
                 await lobby.update_message(bot)
@@ -299,12 +321,18 @@ Updates lobby message on reaction remove
 """
 @bot.event
 async def on_raw_reaction_remove(payload):
+    # ignore reactions from bot (self)
     if payload.user_id == bot.user.id:
-        return  # ignore reactions from the bot itself
+        return  
+    
+    # for any reaction belonging to a lobby message (message_id)
     for lobby in active_lobbies:
         if payload.message_id == lobby.message_id and payload.channel_id == lobby.channel_id:
+            # get the user
             guild = bot.get_guild(payload.guild_id)
             member = guild.get_member(payload.user_id)
+            
+            # if user is stored as a reactor, remove them
             if member and member in lobby.reactors:
                 lobby.reactors.remove(member)
                 await lobby.update_message(bot)
