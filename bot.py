@@ -206,6 +206,7 @@ async def list_lobbies(ctx):
         start_time_str = lobby.start_time.strftime("%Y-%m-%d %I:%M %p")
         reactor_names = ', '.join([member.display_name for member in lobby.reactors])
         channel = bot.get_channel(lobby.channel_id)
+        
         embed.add_field(name=lobby.game, value=f"""Start Time: {start_time_str}\n
                         Players: {reactor_names}\n
                         Channel: {channel.mention}\nID: {lobby.id}""", inline=False)
@@ -221,11 +222,15 @@ async def clear_comms(ctx, *args):
     # input check
     if (len(args) != 1):
         await ctx.send("Invalid input. Use the format: `$clearcomms <ID>`")
+        return
         
-    lobby_id = args
+    lobby_id = int(args[0])
+    lobby = None
     
     # find the lobby with the given ID
-    lobby = next((lobby for lobby in active_lobbies if lobby.id == lobby_id), None)
+    for l in active_lobbies:
+        if lobby_id == l.id:
+            lobby = l
     
     if not lobby:
         await ctx.send(f"Lobby with ID {lobby_id} not found.")
@@ -283,6 +288,7 @@ async def lobby_checker():
 """
 Background task to check for inactive lobbies and removes them from the active list
 Wait time: 5 mins
+Set to 1 min for testing purposes
 """
 @tasks.loop(seconds=60)  # check every minute
 async def inactivity_checker():
@@ -291,7 +297,8 @@ async def inactivity_checker():
     # close lobbies that have been idle for 5 mins
     for lobby in active_lobbies:
         all_members_inactive = all(not m.voice or not m.voice.channel for m in lobby.reactors)
-        if all_members_inactive and (now - lobby.last_voice_activity).total_seconds() > 300:
+        
+        if all_members_inactive and (now - lobby.last_voice_activity).total_seconds() > 60:
             active_lobbies.remove(lobby)
             await bot.get_channel(lobby.channel_id).send(f"Lobby {lobby.id} has been removed due to inactivity.")
 
