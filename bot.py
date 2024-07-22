@@ -31,6 +31,9 @@ async def on_ready():
     if not lobby_checker.is_running():
         lobby_checker.start()  # start the background task
         print("Lobby checker task started")
+    if not inactivity_checker.is_running():
+        inactivity_checker.start()  # start the inactivity checker task
+        print("Inactivity checker task started")
 
 """
 Randomizes games using weighted probabilities using input pairs <game> <probability> ...
@@ -199,16 +202,82 @@ async def list_lobbies(ctx):
     
     await ctx.send(embed=embed)
     
+
 """
-Background task to check lobbies and ping players at the start time
+Moves all players in a lobby to an empty voice channel if one is available
+"""
+@bot.command(name="clearcomms")
+async def clear_comms(ctx, *args):
+    
+    if (len(args) != 1):
+        await ctx.send("Invalid input. Use the format: `$clearcomms <ID>`")
+        
+    lobby_id = args
+    
+    # find the lobby with the given ID
+    lobby = next((lobby for lobby in active_lobbies if lobby.id == lobby_id), None)
+    
+    if not lobby:
+        await ctx.send(f"Lobby with ID {lobby_id} not found.")
+        return
+    
+    # find an empty voice channel
+    guild = ctx.guild
+    empty_channel = next((channel for channel in guild.voice_channels if len(channel.members) == 0), None)
+    
+    if not empty_channel:
+        await ctx.send("No empty voice channels available.")
+        return
+    
+    # move all players in the lobby to the empty voice channel
+    for member in lobby.reactors:
+        if member.voice:
+            await member.move_to(empty_channel)
+    
+    await ctx.send(f"All players in lobby {lobby_id} have been moved to {empty_channel.name}.")
+    
+    
+"""
+Handles voice state updates to remove empty lobbies and update last activity
+"""
+@bot.event
+async def on_voice_state_update(member, before, after):
+    # check if the member joined or left a voice channel
+    for lobby in active_lobbies:
+        if member in lobby.reactors:
+            if before.channel is None and after.channel is not None:
+                # member joined a voice channel
+                lobby.last_voice_activity = datetime.now()
+            elif before.channel is not None and after.channel is None:
+                # member left a voice channel
+                all_members_left = all(not m.voice or not m.voice.channel for m in lobby.reactors)
+                if all_members_left:
+                    lobby.last_voice_activity = datetime.now()
+            break
+    
+"""
+Background task to check lobbies and ping players once at the start time
 """
 @tasks.loop(seconds=60)  # check every minute
 async def lobby_checker():
     now = datetime.now()
     for lobby in active_lobbies:
-        if now >= lobby.start_time:
+        if now >= lobby.start_time and lobby.pinged == False:
+            lobby.pinged = True
             await lobby.ping_players(bot)
+            
+"""
+Background task to check for inactive lobbies and removes them from the active list
+Wait time: 5 mins
+"""
+@tasks.loop(seconds=60)  # check every minute
+async def inactivity_checker():
+    now = datetime.now()
+    for lobby in active_lobbies:
+        all_members_inactive = all(not m.voice or not m.voice.channel for m in lobby.reactors)
+        if all_members_inactive and (now - lobby.last_voice_activity).total_seconds() > 300:
             active_lobbies.remove(lobby)
+            await bot.get_channel(lobby.channel_id).send(f"Lobby {lobby.id} has been removed due to inactivity.")
 
 """
 Updates lobby message on reaction add
@@ -239,7 +308,10 @@ async def on_raw_reaction_remove(payload):
             if member and member in lobby.reactors:
                 lobby.reactors.remove(member)
                 await lobby.update_message(bot)
-                
+        
+"""
+Helper function for pick_game() in order to determine which mode to roulette in
+"""        
 def is_float(value):
     try:
         float(value)
